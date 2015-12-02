@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+
+    Licensed to Apereo under one or more contributor license
+    agreements. See the NOTICE file distributed with this work
+    for additional information regarding copyright ownership.
+    Apereo licenses this file to you under the Apache License,
+    Version 2.0 (the "License"); you may not use this file
+    except in compliance with the License. You may obtain a
+    copy of the License at the following location:
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing,
+    software distributed under the License is distributed on an
+    "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+    KIND, either express or implied. See the License for the
+    specific language governing permissions and limitations
+    under the License.
+
+-->
+<!--
+    | managementConfigContext.xml centralizes into one file some of the declarative configuration that
+    | all CAS deployers will need to modify for the (services) management webapp.
+    |
+    | The beans declared in this file are instantiated at context initialization time by the Spring
+    | ContextLoaderListener declared in web.xml. It finds this file because this
+    | file is among those declared in the context parameter "contextConfigLocation".
+    + -->
+
+<beans
+    xmlns="http://www.springframework.org/schema/beans"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:p="http://www.springframework.org/schema/p"
+    xmlns:c="http://www.springframework.org/schema/c"
+    xmlns:tx="http://www.springframework.org/schema/tx"
+    xmlns:util="http://www.springframework.org/schema/util"
+    xmlns:sec="http://www.springframework.org/schema/security"
+    xmlns:aop="http://www.springframework.org/schema/aop"
+    xsi:schemaLocation="http://www.springframework.org/schema/security http://www.springframework.org/schema/security/spring-security.xsd
+        http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+        http://www.springframework.org/schema/aop http://www.springframework.org/schema/aop/spring-aop-4.1.xsd
+        http://www.springframework.org/schema/tx http://www.springframework.org/schema/tx/spring-tx.xsd
+        http://www.springframework.org/schema/util http://www.springframework.org/schema/util/spring-util.xsd">
+
+    <!--
+        This bean defines the security roles for the Services Management application. Simple deployments can use the in-memory version.
+        More robust deployments will want to use another option, such as the Jdbc version.
+
+        The name of this should remain "userDetailsService" in order for Spring Security to find it.
+    -->
+    <sec:user-service
+        id="userDetailsService"
+        properties="${user.details.file.location:classpath:user-details.properties}" />
+
+    <!--
+        Bean that defines the attributes that a service may return. This example uses the Stub/Mock version. A real implementation
+        may go against a database or LDAP server. The id should remain "attributeRepository" though.
+    -->
+    <bean
+        id="attributeRepository"
+        class="org.jasig.services.persondir.support.StubPersonAttributeDao"
+        p:backingMap-ref="backingMap">
+    </bean>
+
+    <util:map id="backingMap">
+        <entry
+            key="uid"
+            value="uid" />
+        <entry
+            key="eduPersonAffiliation"
+            value="eduPersonAffiliation" />
+        <entry
+            key="groupMembership"
+            value="groupMembership" />
+    </util:map>
+
+
+    <bean
+        id="auditTrailManager"
+        class="org.jasig.inspektr.audit.support.Slf4jLoggingAuditTrailManager" />
+
+    <bean
+        id="serviceRegistryDao"
+        class="org.jasig.cas.services.JpaServiceRegistryDaoImpl" />
+
+    <bean class="org.springframework.orm.jpa.support.PersistenceAnnotationBeanPostProcessor" />
+
+    <util:list id="packagesToScan">
+        <value>org.jasig.cas.services</value>
+    </util:list>
+
+    <bean
+        class="org.springframework.orm.jpa.vendor.HibernateJpaVendorAdapter"
+        id="jpaVendorAdapter"
+        p:generateDdl="true"
+        p:showSql="true" />
+
+    <bean
+        id="entityManagerFactory"
+        class="org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean"
+        p:dataSource-ref="dataSourceForLocal"
+        p:jpaVendorAdapter-ref="jpaVendorAdapter"
+        p:packagesToScan-ref="packagesToScan">
+        <property name="jpaProperties">
+            <props>
+                <prop key="hibernate.dialect">${database.hibernate.dialect}</prop>
+                <prop key="hibernate.hbm2ddl.auto">create-drop</prop>
+                <prop key="hibernate.jdbc.batch_size">${database.batchSize:1}</prop>
+            </props>
+        </property>
+    </bean>
+
+    <bean
+        id="transactionManager"
+        class="org.springframework.orm.jpa.JpaTransactionManager"
+        p:entityManagerFactory-ref="entityManagerFactory" />
+
+    <tx:advice
+        id="txAdvice"
+        transaction-manager="transactionManager">
+        <tx:attributes>
+            <tx:method
+                name="delete*"
+                read-only="false" />
+            <tx:method
+                name="save*"
+                read-only="false" />
+            <tx:method
+                name="update*"
+                read-only="false" />
+            <tx:method
+                name="get*"
+                read-only="true" />
+            <tx:method name="*" />
+        </tx:attributes>
+    </tx:advice>
+
+    <aop:config>
+        <aop:pointcut
+            id="servicesManagerOperations"
+            expression="execution(* org.jasig.cas.services.JpaServiceRegistryDaoImpl.*(..))" />
+        <aop:advisor
+            advice-ref="txAdvice"
+            pointcut-ref="servicesManagerOperations" />
+    </aop:config>
+
+    <bean
+        id="dataSourceForLocal"
+        class="com.mchange.v2.c3p0.ComboPooledDataSource"
+        p:driverClass="${database.driverClass}"
+        p:jdbcUrl="${database.url}"
+        p:user="${database.user}"
+        p:password="${database.password}"
+        p:initialPoolSize="${database.pool.minSize}"
+        p:minPoolSize="${database.pool.minSize}"
+        p:maxPoolSize="${database.pool.maxSize}"
+        p:maxIdleTimeExcessConnections="${database.pool.maxIdleTime}"
+        p:checkoutTimeout="${database.pool.maxWait}"
+        p:acquireIncrement="${database.pool.acquireIncrement}"
+        p:acquireRetryAttempts="${database.pool.acquireRetryAttempts}"
+        p:acquireRetryDelay="${database.pool.acquireRetryDelay}"
+        p:idleConnectionTestPeriod="${database.pool.idleConnectionTestPeriod}"
+        p:preferredTestQuery="${database.pool.connectionHealthQuery}" />
+</beans>
